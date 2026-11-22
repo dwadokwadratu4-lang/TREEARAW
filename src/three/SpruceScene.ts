@@ -1657,7 +1657,7 @@ export class SpruceSceneManager {
   }
 
   /**
-   * Przełączanie trybu [3D] <-> [AR] (znacznik HIRO, tylna kamera environment, LERP smoothing)
+   * Przełączanie trybu [3D] <-> [AR] (znacznik HIRO, tylna kamera environment, pełny ekran i reset dotyku)
    */
   public async setViewMode(mode: ViewMode): Promise<void> {
     if (this.viewMode === mode) return;
@@ -1668,16 +1668,34 @@ export class SpruceSceneManager {
       this.savedOrbitTarget.copy(this.controls.target);
 
       this.cameraAnimating = false;
+      this.isArDragging = false;
+      this.arDragDistance = 0;
       this.controls.enabled = false;
+
       // Kamera musi stać w punkcie (0,0,0) przy macierzy jednostkowej dla AR.js modelViewMatrix
+      const w = Math.max(1, window.innerWidth);
+      const h = Math.max(1, window.innerHeight);
       this.camera.position.set(0, 0, 0);
       this.camera.quaternion.identity();
       this.camera.scale.set(1, 1, 1);
+      this.camera.aspect = w / h;
+      this.camera.updateProjectionMatrix();
       this.camera.updateMatrixWorld(true);
 
       this.scene.background = null;
       this.scene.fog = null;
       this.renderer.setClearAlpha(0);
+
+      const canvas = this.renderer.domElement;
+      canvas.style.position = 'fixed';
+      canvas.style.inset = '0';
+      canvas.style.width = '100vw';
+      canvas.style.height = '100vh';
+      canvas.style.margin = '0';
+      canvas.style.objectFit = 'cover';
+      canvas.style.pointerEvents = 'auto';
+      canvas.style.touchAction = 'none';
+      this.renderer.setSize(w, h, false);
 
       this.arLocked = false;
       this.arTargetYaw = 0;
@@ -1694,51 +1712,63 @@ export class SpruceSceneManager {
       this.arSmoothedGroup.visible = false;
       this.arRawMarkerGroup.visible = false;
 
-      this.renderer.domElement.style.touchAction = 'none';
       this.initArTracking();
     } else {
       this.teardownArTracking();
       this.arLocked = false;
       this.arTargetYaw = 0;
       this.arCurrentYaw = 0;
+      this.isArDragging = false;
+      this.arDragDistance = 0;
+      this.cameraAnimating = false;
 
-      // Przywróć scenę 3D
+      // Przywróć grupę główną drzewa i scenę 3D
       this.scene.add(this.islandRoot);
       this.islandRoot.position.set(0, 0, 0);
       this.islandRoot.rotation.set(0, 0, 0);
-      this.islandRoot.scale.setScalar(1);
+      this.islandRoot.scale.set(1, 1, 1);
       this.islandRoot.visible = true;
 
       this.scene.background = this.skyBgColor;
       this.scene.fog = this.fog;
       this.renderer.setClearAlpha(1);
-      this.renderer.domElement.style.touchAction = 'auto';
-      this.renderer.domElement.style.position = 'static';
 
-      const w = Math.max(1, this.container.clientWidth);
-      const h = Math.max(1, this.container.clientHeight);
-      this.camera.position.copy(this.savedCamPos);
-      this.controls.target.copy(this.savedOrbitTarget);
+      const canvas = this.renderer.domElement;
+      canvas.style.position = 'static';
+      canvas.style.inset = 'auto';
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      canvas.style.margin = '0';
+      canvas.style.objectFit = '';
+      canvas.style.pointerEvents = 'auto';
+      // OrbitControls wymaga touch-action: none, aby przeglądarka nie przejmowała gestów palców
+      canvas.style.touchAction = 'none';
+
+      const w = Math.max(1, this.container.clientWidth || window.innerWidth);
+      const h = Math.max(1, this.container.clientHeight || window.innerHeight);
+      this.renderer.setSize(w, h);
+      this.camera.position.set(...CAMERA_PRESETS.overview.position);
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
-      this.renderer.setSize(w, h);
-      this.renderer.domElement.style.width = '100%';
-      this.renderer.domElement.style.height = '100%';
-      this.renderer.domElement.style.marginLeft = '0px';
-      this.renderer.domElement.style.marginTop = '0px';
 
       this.controls.enabled = true;
+      this.controls.target.set(0, 1.5, 0);
       this.controls.update();
     }
   }
 
+  private handleVideoMetadata = (): void => {
+    this.syncArResize();
+  };
+
   private initArTracking(): void {
+    this.teardownArTracking();
     this.arReady = false;
     this.arWasMarkerVisible = false;
     this.onArStatusChange?.('initializing', 'Uruchamianie tylnej kamery telefonu...');
 
-    const sourceWidth = window.innerWidth > window.innerHeight ? 640 : 480;
-    const sourceHeight = window.innerWidth > window.innerHeight ? 480 : 640;
+    const sourceWidth = 640;
+    const sourceHeight = 480;
 
     const arSource = new THREEx.ArToolkitSource({
       sourceType: 'webcam',
@@ -1750,6 +1780,10 @@ export class SpruceSceneManager {
     const onCameraInit = (e: Event) => {
       const detail = (e as CustomEvent<{ stream: MediaStream }>).detail;
       if (detail?.stream) {
+        if (this.viewMode !== 'ar' || this.disposed) {
+          detail.stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
         this.arMediaStream = detail.stream;
       }
     };
@@ -1765,14 +1799,21 @@ export class SpruceSceneManager {
         const videoEl = arSource.domElement as HTMLVideoElement;
         if (videoEl) {
           videoEl.style.position = 'fixed';
-          videoEl.style.top = '0';
-          videoEl.style.left = '0';
+          videoEl.style.inset = '0';
+          videoEl.style.width = '100vw';
+          videoEl.style.height = '100vh';
+          videoEl.style.maxWidth = 'none';
+          videoEl.style.maxHeight = 'none';
+          videoEl.style.margin = '0';
+          videoEl.style.objectFit = 'cover';
           videoEl.style.zIndex = '1';
+          videoEl.style.pointerEvents = 'none';
+          videoEl.style.display = 'block';
           videoEl.setAttribute('playsinline', 'true');
+          videoEl.addEventListener('loadedmetadata', this.handleVideoMetadata, {
+            once: true,
+          });
         }
-        this.renderer.domElement.style.position = 'fixed';
-        this.renderer.domElement.style.top = '0';
-        this.renderer.domElement.style.left = '0';
 
         const arContext = new THREEx.ArToolkitContext({
           cameraParametersUrl: '/ar/camera_para.dat',
@@ -1782,7 +1823,6 @@ export class SpruceSceneManager {
 
         arContext.init(() => {
           if (this.viewMode !== 'ar' || this.disposed) return;
-          this.camera.projectionMatrix.copy(arContext.getProjectionMatrix());
           this.arReady = true;
           this.onArStatusChange?.('searching', 'Skieruj kamerę na czarny znacznik HIRO');
           this.syncArResize();
@@ -1815,7 +1855,8 @@ export class SpruceSceneManager {
           }
         );
 
-        setTimeout(() => this.syncArResize(), 350);
+        this.syncArResize();
+        setTimeout(() => this.syncArResize(), 300);
       },
       (err: { name?: string; message?: string }) => {
         this.onArStatusChange?.(
@@ -1828,19 +1869,60 @@ export class SpruceSceneManager {
   }
 
   private syncArResize(): void {
-    if (this.viewMode !== 'ar' || !this.arToolkitSource || !this.arToolkitSource.ready) {
+    if (this.viewMode !== 'ar') {
       return;
     }
     try {
+      const w = Math.max(1, window.innerWidth);
+      const h = Math.max(1, window.innerHeight);
+
+      const videoEl =
+        (this.arToolkitSource?.domElement as HTMLVideoElement | undefined) ||
+        (document.getElementById('arjs-video') as HTMLVideoElement | null);
+      if (videoEl) {
+        videoEl.style.position = 'fixed';
+        videoEl.style.inset = '0';
+        videoEl.style.width = '100vw';
+        videoEl.style.height = '100vh';
+        videoEl.style.maxWidth = 'none';
+        videoEl.style.maxHeight = 'none';
+        videoEl.style.margin = '0';
+        videoEl.style.objectFit = 'cover';
+        videoEl.style.zIndex = '1';
+        videoEl.style.pointerEvents = 'none';
+        videoEl.style.display = 'block';
+      }
+
+      const canvas = this.renderer.domElement;
+      canvas.style.position = 'fixed';
+      canvas.style.inset = '0';
+      canvas.style.width = '100vw';
+      canvas.style.height = '100vh';
+      canvas.style.margin = '0';
+      canvas.style.objectFit = 'cover';
+      canvas.style.pointerEvents = 'auto';
+      canvas.style.touchAction = 'none';
+
+      this.renderer.setSize(w, h, false);
+      this.camera.aspect = w / h;
+
       if (this.arToolkitContext?.arController) {
-        this.arToolkitSource.onResize(
-          this.arToolkitContext,
-          this.renderer,
-          this.camera
+        this.camera.projectionMatrix.copy(
+          this.arToolkitContext.getProjectionMatrix()
         );
+        const videoAspect =
+          videoEl && videoEl.videoWidth > 0 && videoEl.videoHeight > 0
+            ? videoEl.videoWidth / videoEl.videoHeight
+            : 4 / 3;
+        const screenAspect = w / h;
+        // Dopasowanie ogniskowej do object-fit: cover na ekranie pionowym i poziomym
+        if (screenAspect < videoAspect) {
+          this.camera.projectionMatrix.elements[0] *= videoAspect / screenAspect;
+        } else if (screenAspect > videoAspect) {
+          this.camera.projectionMatrix.elements[5] *= screenAspect / videoAspect;
+        }
       } else {
-        this.arToolkitSource.onResizeElement();
-        this.arToolkitSource.copyElementSizeTo(this.renderer.domElement);
+        this.camera.updateProjectionMatrix();
       }
     } catch {
       // ignore if video metadata not yet ready
@@ -1856,14 +1938,26 @@ export class SpruceSceneManager {
       this.arMediaStream = null;
     }
 
-    const videoEl = document.getElementById('arjs-video') as HTMLVideoElement | null;
-    if (videoEl) {
+    const videos = new Set<HTMLVideoElement>();
+    const byId = document.getElementById('arjs-video') as HTMLVideoElement | null;
+    if (byId) videos.add(byId);
+    if (this.arToolkitSource?.domElement instanceof HTMLVideoElement) {
+      videos.add(this.arToolkitSource.domElement);
+    }
+    document.querySelectorAll('video').forEach((v) => videos.add(v));
+
+    videos.forEach((videoEl) => {
+      videoEl.removeEventListener('loadedmetadata', this.handleVideoMetadata);
       const stream = videoEl.srcObject as MediaStream | null;
       if (stream) {
         stream.getTracks().forEach((t) => t.stop());
       }
+      videoEl.pause();
+      videoEl.srcObject = null;
+      videoEl.style.pointerEvents = 'none';
+      videoEl.style.display = 'none';
       videoEl.remove();
-    }
+    });
 
     const errorPopup = document.getElementById('error-popup');
     errorPopup?.remove();
@@ -2151,6 +2245,7 @@ export class SpruceSceneManager {
 
   private bindEvents(): void {
     window.addEventListener('resize', this.handleResize);
+    window.addEventListener('orientationchange', this.handleResize);
     this.renderer.domElement.addEventListener('click', this.handleCanvasClick);
     this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown);
     window.addEventListener('pointermove', this.handlePointerMove);
@@ -2368,6 +2463,7 @@ export class SpruceSceneManager {
     clearTimeout(this.frameId);
     this.teardownArTracking();
     window.removeEventListener('resize', this.handleResize);
+    window.removeEventListener('orientationchange', this.handleResize);
     this.renderer.domElement.removeEventListener('click', this.handleCanvasClick);
     this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown);
     window.removeEventListener('pointermove', this.handlePointerMove);
