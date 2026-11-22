@@ -1,0 +1,6 @@
+{
+  "name": "Pomiary Drzewa — Monitoring Świerka 3D",
+  "description": "Interaktywna symulacja i wizualizacja telemetryczna 3D monitoringu stanu zdrowia świerka z dendrometrem, czujnikami kory i gleby, stacją meteo 5m, danymi IMGW oraz sterownikiem ESP32.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

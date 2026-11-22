@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="spruceBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#166534" />
+      <stop offset="55%" stop-color="#15803d" />
+      <stop offset="100%" stop-color="#0f5132" />
+    </linearGradient>
+    <linearGradient id="spruceBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#bbf7d0" stop-opacity="0.85" />
+      <stop offset="50%" stop-color="#6ee7b7" stop-opacity="0.55" />
+      <stop offset="100%" stop-color="#fde68a" stop-opacity="0.7" />
+    </linearGradient>
+  </defs>
+
+  <!-- Zaokrąglony ciemnozielony kwadrat -->
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="url(#spruceBg)" />
+
+  <!-- Subtelna jasna ramka -->
+  <rect
+    x="26"
+    y="26"
+    width="460"
+    height="460"
+    rx="94"
+    fill="none"
+    stroke="url(#spruceBorder)"
+    stroke-width="10"
+  />
+
+  <!-- Subtelny akcent wierzchołka świerka u góry -->
+  <path
+    d="M256 68 L286 112 L270 112 L294 146 L218 146 L242 112 L226 112 Z"
+    fill="#bbf7d0"
+    fill-opacity="0.22"
+  />
+
+  <!-- Wyraźne białe inicjały AW na środku -->
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Litera A -->
+    <path d="M115 340 L173 172 L231 340" stroke-width="32" />
+    <path d="M136 288 L210 288" stroke-width="26" />
+    <!-- Litera W -->
+    <path d="M265 172 L295 340 L331 224 L367 340 L397 172" stroke-width="31" />
+  </g>
+</svg>
